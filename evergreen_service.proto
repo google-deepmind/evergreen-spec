@@ -1,0 +1,26 @@
+// Evergreen service definition.
+
+syntax = "proto3";
+
+package evergreen.v2;
+
+import "google/gdm/evergreen/evergreen.proto";
+
+// A single streaming unit of the Evergreen session.
+message SessionMessage {
+  repeated NodeFragment node_fragments = 1;
+  repeated Action actions = 2;
+}
+
+service EvergreenService {
+
+  // Establishes an Evergreen session within which multiple Actions can be sent.
+  // Concrete semantics of the request are determined by the actions used.
+  //
+  // Actions can share parts of inputs and accept outputs of previous actions
+  // without re-sending them. It is highly beneficial to group related Actions,
+  // e.g. GENERATE actions from a single user-assistant interaction session.
+  // However unrelated Actions, such as entries in an eval dataset should be
+  // sent in separate sessions.
+  rpc StartSession(stream SessionMessage) returns (stream SessionMessage) {}
+}

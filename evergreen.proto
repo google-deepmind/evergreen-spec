@@ -1,0 +1,210 @@
+// Messages for holding Evergreen content.
+//
+// Our main concepts are:
+//
+// Chunk: represents data of a single modality, such as text or an image. The
+//   list of supported modalities is kept open by storing chunks as bytes + MIME
+//   type. Chunks can also have metadata attached to them.
+//
+// Content: an ordered sequence of chunks, representing a multimodal content,
+//   such as interleaved text with images. By attaching metadata to chunks in
+//   the stream, things like a conversation can be expressed too.
+//
+// Node: Instead of a simple list of Chunks, we represent content as a tree of
+//   Nodes to (a) share common content across different actions, and (b) stream
+//   different chunks out of order. The input and output of an action is the
+//   result of flattening the respective tree of nodes into a list of chunks.
+//
+// Actions: are analogous to functions in programming languages, receiving named
+//   input nodes as arguments and returning named output nodes.
+
+syntax = "proto3";
+
+package evergreen.v2;
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+// Nodes represent an ordered list of Chunks. To allow out of order delivery and
+// sharing content across different actions they are organized as a DAG. Leaf
+// Nodes contain a single Chunk of data, potentially split across fragments
+// when sent over the wire. Non-leaf nodes define the order of nested nodes
+// while delivering them concurrently and in an out-of-order fashion.
+//
+// For example, a wikipedia page can be sent as a root node, with several text,
+// image and video child nodes. Text and image nodes would all be leaf nodes
+// containing their respective chunks. In contrast, each video node can further
+// be split into a sequence of leaf nodes corresponding to individual frames.
+//
+// The effective content of any Node can be rebuilt by flattening and
+// concatenating chunks (the leaves) traversed in depth-first order. We use a
+// directed acyclic graph for late-binding of future-arriving chunks, not to
+// build a hierarchy.
+message Node {
+  // Identifies a particular node within the session.
+  // IDs should not bear semantics: requests should not change semantics if
+  // each ID is replaced with a random string. Action input/output names should
+  // be used for that instead.
+  string id = 1;
+
+  // Ordered list of IDs of nodes that are children of this node.
+  // Nodes with children can not contain a `Chunk` payload.
+  repeated string child_ids = 4;
+
+  // Payload if this is a leaf node.
+  optional Chunk chunk = 5;
+}
+
+// Node contents are streamed in multiple `NodeFragment` messages with the
+// same id.
+message NodeFragment {
+  // Identifies a particular node within the session.
+  // IDs should not bear semantics: requests should not change semantics if
+  // each ID is replaced with a random string. Action input/output names should
+  // be used for that instead.
+  //
+  // Nodes can be streamed by providing multiple messages with the same ID,
+  // and incrementing values of `seq`.
+  string id = 1;
+
+  // 0-based position of this message in the sequence of fragments that make
+  // up the node identified by the id. If multiple `NodeFragment` messages with
+  // the same id and sequence number are received the receiver can pick any
+  // (usually the first received) and discard the rest.
+  int32 seq = 2;
+
+  // Whether there are messages with higher `seq` representing this node.
+  bool continued = 3;
+
+  // Ordered list of IDs of nodes that are children of this node.
+  // If `child_ids` is set in the first `NodeFragment` message (seq=0), no
+  // `NodeFragment` with the same `id` can contain a `chunk_fragment`. The
+  // final Node is created by concatenating `child_ids` in order.
+  repeated string child_ids = 4;
+
+  // A fragment of the Chunk payload of the leaf node.
+  // If `chunk_fragment` is set in the first `NodeFragment` message (seq=0), no
+  // `NodeFragment` with the same `id` can contain `child_ids`. A leaf node can
+  // contain only one Chunk, but it can be streamed over multiple fragments
+  // delivered in multiple `NodeFragment` messages, in which case Chunk
+  // data is concatenated and only chunk_fragment.metadata from the 0th
+  // `NodeFragment` is used.
+  optional Chunk chunk_fragment = 5;
+}
+
+// Container for bytes-encoded data from the represented content. A Chunk is
+// either a single ref or a concatenation of one or more byte fragments,
+// sent as separate `Chunk` messages over the wire to facilitate streaming.
+message Chunk {
+  ChunkMetadata metadata = 1;
+
+  oneof payload {
+    // A URI referencing data on an external system.
+    string ref = 3;
+
+    // Binary data inlined in the protobuf message.
+    bytes data = 10;
+  }
+
+  // Next ID: When printed, fields with lower IDs are printed first. Assign
+  // IDs < 10 to small informative fields, placing them before data. Big fields
+  // should be assigned bigger IDs.
+}
+
+// Represents metadata of a chunk.
+message ChunkMetadata {
+  // Mime type of the chunk data. See
+  // https://www.iana.org/assignments/media-types/media-types.xhtml for the full
+  // list. Commonly used types that our models are expected to understand:
+  //   text/plain: Generic text, e.g. user's input for an LLM.
+  //   text/*: Models should default to treating any text/ type as text/plain if
+  //           they don't have a custom handler for it.
+  //   image/webp: Prefer webp format for encoding images.
+  // Programming/markup languages. Use the following types to emphasize that the
+  // text is a program in a certain language or should be rendered in a
+  // particular way. Models should default to ingesting these as text if they
+  // do not have custom handlers for these mimetypes.
+  //   text/x-python: Python
+  //   application/x-latex: LaTEX
+  //   text/markdown: Markdown
+  //
+  string mimetype = 1;
+
+  // The role in a conversation associated with this chunk if the chunk
+  // represents a turn in the conversation. For non conversational interactions
+  // it can be left empty or unset.
+  // For convenience client & server libraries may allow users not to set the
+  // role. In which case a suitable default value must be set before sending the
+  // chunk over the wire.
+  string role = 2;
+
+  // File name including extension but excluding the directory of the original
+  // file, if the Chunk has been uploaded as a file.
+  string original_file_name = 3;
+
+  // Time when the chunk has been observed or created, if known.
+  // Timestamp does not convey logical ordering. Implementations must not
+  // reorder chunks based on this timestamp. Transforming (e.g. tokenizing)
+  // a chunk should not change its capture_time.
+  //
+  // capture_time is useful to record latencies in real-time systems.
+  google.protobuf.Timestamp capture_time = 6;
+
+  // An escape hatch for attaching custom metadata. It is intended for
+  // prototyping purposes. Consider adding strongly typed nested messages to
+  // Metadata for commonly used metadata where a standard interface would be
+  // beneficial.
+  repeated google.protobuf.Any experimental = 100;
+}
+
+// Represents action's input or output.
+message NamedParameter {
+  // Name of the input or output.
+  // Analogous to a function parameter name in programming languages.
+  string name = 1;
+  // ID of the root Node that holds an instance of input/output for the Action.
+  // Analogous to an argument passed for this function parameter.
+  string id = 2;
+}
+
+// Represents a spec for the target being queried.
+message TargetSpec {
+  // Identifies the target (model/agent/endpoint) for an action to run on.
+  // Target is service dependent.
+  // The ID should be unique within the scope of the service used.
+  string id = 1;
+}
+
+// Actions are a predefined set of functions (e.g., GENERATE). The inputs and
+// outputs are named nodes, similar to named arguments in programming languages.
+// The acceptable input and output parameters, the type of outputs, and the
+// configuration fields are defined by the function. We do not impose any
+// limitations on that.
+message Action {
+  reserved 1;
+
+  // What action to perform.
+  string name = 2;
+  // A dictionary of the Action inputs. This is analogous to named arguments in
+  // programming languages, without any particular ordering. Each parameter name
+  // can be used only once within a single Action. It is valid to pass the same
+  // Node ID to multiple parameters.
+  repeated NamedParameter inputs = 3;
+  // A dictionary of node IDs which the server should be using to return
+  // the results. The provided node IDs in the output must be new and must not
+  // be reused. If an output name is supported by the action type but is not
+  // provided by the sender, it means that the sender will not use that
+  // particular field of the output and it need not be populated by the server.
+  repeated NamedParameter outputs = 4;
+  // Action configuration. Actions can accept multiple config messages that
+  // control different aspects. To improve interoperability prefer reusing
+  // existing/shared configs and complementing them with implementation-specific
+  // configs in a separate `config` entry.
+  repeated google.protobuf.Any configs = 5;
+  // What target to perform the action on.
+  // If the server does not provide the requested target, it should reject the
+  // request with kNotFound.
+  // Servers may interpret empty/unset target id as their default target e.g.
+  // if they provide a single target.
+  TargetSpec target_spec = 6;
+}
