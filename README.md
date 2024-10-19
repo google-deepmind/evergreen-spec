@@ -6,7 +6,7 @@ can support a wide range of existing, planned, and unforeseen use cases in the
 long run, while being immediately useful for generative AI use cases today.
 
 We would appreciate any feedback on the design of the protocol, compelling use
-cases, and things we haven't considered.
+cases, and things we haven't considered. To reach out to us, either use the [Github issues](https://github.com/google-deepmind/evergreen-spec/issues/new) tool or send us an email at evergreen-oss-team@google.com.
 
 ## Data model description
 
