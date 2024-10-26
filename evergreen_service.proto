@@ -19,7 +19,7 @@ syntax = "proto3";
 
 package evergreen.v2;
 
-import "google/gdm/evergreen/evergreen.proto";
+import "evergreen.proto";
 
 // A single streaming unit of the Evergreen session.
 message SessionMessage {

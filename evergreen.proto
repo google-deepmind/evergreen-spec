@@ -55,21 +55,7 @@ import "google/protobuf/timestamp.proto";
 // concatenating chunks (the leaves) traversed in depth-first order. We use a
 // directed acyclic graph for late-binding of future-arriving chunks, not to
 // build a hierarchy.
-message Node {
-  // Identifies a particular node within the session.
-  // IDs should not bear semantics: requests should not change semantics if
-  // each ID is replaced with a random string. Action input/output names should
-  // be used for that instead.
-  string id = 1;
-
-  // Ordered list of IDs of nodes that are children of this node.
-  // Nodes with children can not contain a `Chunk` payload.
-  repeated string child_ids = 4;
-
-  // Payload if this is a leaf node.
-  optional Chunk chunk = 5;
-}
-
+//
 // Node contents are streamed in multiple `NodeFragment` messages with the
 // same id.
 message NodeFragment {
