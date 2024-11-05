@@ -8,6 +8,21 @@ long run, while being immediately useful for generative AI use cases today.
 We would appreciate any feedback on the design of the protocol, compelling use
 cases, and things we haven't considered. To reach out to us, either use the [Github issues](https://github.com/google-deepmind/evergreen-spec/issues/new) tool or send us an email at evergreen-oss-team@google.com.
 
+- [Data model description](#data-model-description)
+    - [Nodes, chunks, and actions](#nodes-chunks-and-actions)
+    - [Identification](#identification)
+    - [Lifetime](#lifetime)
+    - [Ordering](#ordering)
+    - [Boundaries](#boundaries)
+    - [Mime type](#mime-type)
+    - [Chunk payloads](#chunk-payloads)
+    - [Generating actions](#generating-actions)
+    - [Error handling](#error-handling)
+    - [Default actions](#default-actions)
+    - [Default values](#default-values)
+- [Future extensions / decisions](#future-extensions--decisions)
+- [Examples](#examples)
+
 ## Data model description
 
 ### Nodes, chunks, and actions
@@ -218,7 +233,7 @@ Client sends:
 
 ```
 action {
-  type: "GENERATE"
+  name: "GENERATE"
   input {name: "prompt", id: "prompt_1"}
   output {name: "response", id: "response_1"}
 }
@@ -229,7 +244,7 @@ node_fragment {
 }
 node_fragment {
   id: "question_1"
-  chunk: {
+  chunk_fragment: {
     metadata { mimetype: "text/plain" }
     data: "Write a summary of this video: "
   }
@@ -238,7 +253,7 @@ node_fragment {
   id: "video_1"
   seq: 0
   continued: true
-  chunk: {
+  chunk_fragment: {
     metadata { mimetype: "video/mp4" }
     ref: "file://path/to/file/part1"
   }
@@ -246,7 +261,7 @@ node_fragment {
 node_fragment {
   id: "video_1"
   seq: 1
-  chunk: {
+  chunk_fragment: {
     # NOTE: Metadata in the second chunk can be omitted.
     metadata { mimetype: "video/mp4" }
     # the content of the video at /part2 is concatenated
@@ -264,15 +279,15 @@ node_fragment {
   id: "response_1"
   seq: 0
   continued: true
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "It is a translation of an "
   }
 }
-chunk {
+node_fragment {
   id: "response_1"
   seq: 1
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "F1 race. "
   }
@@ -283,7 +298,7 @@ Client sends:
 
 ```
 action {
-  type: "GENERATE"
+  name: "GENERATE"
   input {name: "prompt", id: "prompt_2"}
   output {name: "response", id: "response_2"}
 }
@@ -295,7 +310,7 @@ node_fragment {
 }
 node_fragment {
   id: "question_2"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "Who's winning?"
   }
@@ -307,7 +322,7 @@ Server sends:
 ```
 node_fragment {
   id: "response_2"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "Ayrton Senna."
   }
@@ -321,7 +336,7 @@ Client sends:
 
 ```
 action {
-  type: "GENERATE"
+  name: "GENERATE"
   config: [...proto.Any wrapping GenerateConfig...]
   input {name: "text", id: "prompt_1"}
   output {name: "text", id: "response_1"}
@@ -333,14 +348,14 @@ node_fragment {
 }
 node_fragment {
   id: "prompt_1_text"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "Write a heroic novel about a half-eaten jam doughnut."
   }
 }
 node_fragment {
   id: "prompt_1_eot"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "application/x-protobuf; type=EndOfTurn" }
   }
 }
@@ -352,7 +367,7 @@ Client sends:
 
 ```
 action {
-  type: "GENERATE"
+  name: "GENERATE"
   config: [...proto.Any wrapping GenerateConfig...]
   input {name: "text", id: "prompt_1"}
   output {name: "text", id: "response_1"}
@@ -365,7 +380,7 @@ node_fragment {
 }
 node_fragment {
   id: "prompt_1_text"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "text/plain" }
     data: "Write a heroic novel about a half-eaten jam doughnut."
   }
@@ -380,7 +395,7 @@ node_fragment {
 }
 node_fragment {
   id: "prompt_1_eot"
-  chunk {
+  chunk_fragment {
     metadata { mimetype: "application/x-protobuf; type=EndOfTurn" }
   }
 }
